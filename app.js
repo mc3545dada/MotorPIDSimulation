@@ -116,6 +116,8 @@ const canvases = {
   output: document.getElementById("outputChart"),
   error: document.getElementById("errorChart"),
 };
+const chartState = new Map();
+const tooltipEl = createChartTooltip();
 
 document.getElementById("runButton").addEventListener("click", runSimulation);
 const runButtonTop = document.getElementById("runButtonTop");
@@ -133,6 +135,7 @@ document.querySelectorAll("[data-preset]").forEach((button) => {
     runSimulation();
   });
 });
+Object.values(canvases).forEach(bindChartInteraction);
 
 applyValues(defaults);
 runSimulation();
@@ -166,6 +169,7 @@ function runSimulation() {
   const result = simulate(config);
   renderMetrics(config, result);
   renderCharts(config, result);
+  hideChartTooltip();
 }
 
 function simulate(config) {
@@ -366,7 +370,7 @@ function renderCharts(config, result) {
   });
 }
 
-function drawLineChart(canvas, data) {
+function drawLineChart(canvas, data, hoverIndex = null) {
   const ctx = canvas.getContext("2d");
   const width = canvas.width;
   const height = canvas.height;
@@ -392,6 +396,7 @@ function drawLineChart(canvas, data) {
   const minX = data.labels[0] ?? 0;
   const maxX = data.labels[data.labels.length - 1] ?? 1;
   const safeXSpan = Math.max(maxX - minX, 1e-9);
+  chartState.set(canvas.id, { data, minX, maxX, minY, maxY, padding, plotWidth, plotHeight, safeXSpan });
 
   ctx.strokeStyle = "rgba(107, 114, 128, 0.22)";
   ctx.lineWidth = 1;
@@ -440,6 +445,28 @@ function drawLineChart(canvas, data) {
     ctx.stroke();
   }
 
+  if (hoverIndex != null && hoverIndex >= 0 && hoverIndex < data.labels.length) {
+    const hoverX = padding.left + ((data.labels[hoverIndex] - minX) / safeXSpan) * plotWidth;
+    ctx.strokeStyle = "rgba(10, 80, 110, 0.45)";
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(hoverX, padding.top);
+    ctx.lineTo(hoverX, height - padding.bottom);
+    ctx.stroke();
+
+    for (const series of data.series) {
+      const v = series.values[hoverIndex];
+      const y = padding.top + ((maxY - v) / (maxY - minY)) * plotHeight;
+      ctx.beginPath();
+      ctx.fillStyle = series.color;
+      ctx.arc(hoverX, y, 3.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "#f8f6f1";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+  }
+
   let legendX = padding.left;
   const legendY = 12;
   for (const series of data.series) {
@@ -449,6 +476,67 @@ function drawLineChart(canvas, data) {
     ctx.fillText(series.label, legendX + 14, legendY);
     legendX += ctx.measureText(series.label).width + 42;
   }
+}
+
+function bindChartInteraction(canvas) {
+  if (!canvas) return;
+  canvas.addEventListener("mousemove", (event) => {
+    const state = chartState.get(canvas.id);
+    if (!state || !state.data.labels.length) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const x = (event.clientX - rect.left) * scaleX;
+    const minPlotX = state.padding.left;
+    const maxPlotX = canvas.width - state.padding.right;
+    if (x < minPlotX || x > maxPlotX) {
+      drawLineChart(canvas, state.data);
+      hideChartTooltip();
+      return;
+    }
+
+    const ratio = (x - minPlotX) / (maxPlotX - minPlotX);
+    const index = Math.max(0, Math.min(state.data.labels.length - 1, Math.round(ratio * (state.data.labels.length - 1))));
+    drawLineChart(canvas, state.data, index);
+    showChartTooltip(state.data, index, event.clientX, event.clientY);
+  });
+
+  canvas.addEventListener("mouseleave", () => {
+    const state = chartState.get(canvas.id);
+    if (state) drawLineChart(canvas, state.data);
+    hideChartTooltip();
+  });
+}
+
+function createChartTooltip() {
+  const el = document.createElement("div");
+  el.className = "chart-tooltip";
+  el.style.display = "none";
+  document.body.appendChild(el);
+  return el;
+}
+
+function showChartTooltip(data, index, clientX, clientY) {
+  const lines = [`t = ${format(data.labels[index], 3)} s`];
+  for (const series of data.series) {
+    lines.push(`${series.label}: ${format(series.values[index], 3)}`);
+  }
+  tooltipEl.innerHTML = lines.map((line) => `<div>${line}</div>`).join("");
+  tooltipEl.style.display = "block";
+  tooltipEl.style.left = `${clientX + 14}px`;
+  tooltipEl.style.top = `${clientY + 14}px`;
+
+  const rect = tooltipEl.getBoundingClientRect();
+  if (rect.right > window.innerWidth - 8) {
+    tooltipEl.style.left = `${clientX - rect.width - 14}px`;
+  }
+  if (rect.bottom > window.innerHeight - 8) {
+    tooltipEl.style.top = `${clientY - rect.height - 14}px`;
+  }
+}
+
+function hideChartTooltip() {
+  tooltipEl.style.display = "none";
 }
 
 function clampSymmetric(value, limit) {
