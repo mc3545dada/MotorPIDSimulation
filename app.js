@@ -1,4 +1,4 @@
-class PIDController {
+﻿class PIDController {
   constructor(kp, ki, kd, outLimit, ioutLimit) {
     this.kp = kp;
     this.ki = ki;
@@ -30,7 +30,10 @@ class PIDController {
 }
 
 const defaults = {
+  simMode: "realtime",
   mode: "cascade",
+  realtimeSpeed: 1,
+  realtimeWindowSec: 8,
   targetAngle: 90,
   targetSpeed: 120,
   angleKp: 15,
@@ -118,14 +121,19 @@ const canvases = {
 };
 const chartState = new Map();
 const tooltipEl = createChartTooltip();
+let realtimeRuntime = null;
 
 document.getElementById("runButton").addEventListener("click", runSimulation);
 const runButtonTop = document.getElementById("runButtonTop");
 if (runButtonTop) runButtonTop.addEventListener("click", runSimulation);
 const runButtonTopResult = document.getElementById("runButtonTopResult");
 if (runButtonTopResult) runButtonTopResult.addEventListener("click", runSimulation);
+const updateRtButton = document.getElementById("updateRtButton");
+if (updateRtButton) updateRtButton.addEventListener("click", updateRealtimeTargets);
 document.getElementById("resetButton").addEventListener("click", () => {
+  stopRealtimeSimulation();
   applyValues(defaults);
+  updateModeUI();
   runSimulation();
 });
 
@@ -138,6 +146,11 @@ document.querySelectorAll("[data-preset]").forEach((button) => {
 Object.values(canvases).forEach(bindChartInteraction);
 
 applyValues(defaults);
+const simModeEl = document.getElementById("simMode");
+if (simModeEl) {
+  simModeEl.addEventListener("change", updateModeUI);
+}
+updateModeUI();
 runSimulation();
 
 function applyValues(values) {
@@ -166,10 +179,192 @@ function readValues() {
 
 function runSimulation() {
   const config = readValues();
+  if (config.simMode === "realtime") {
+    startRealtimeSimulation(config);
+    return;
+  }
+
+  stopRealtimeSimulation();
   const result = simulate(config);
   renderMetrics(config, result);
   renderCharts(config, result);
   hideChartTooltip();
+}
+
+function updateModeUI() {
+  const config = readValues();
+  const realtime = config.simMode === "realtime";
+  document.querySelectorAll(".realtime-only").forEach((el) => {
+    el.style.display = realtime ? "block" : "none";
+  });
+  setRunButtonsText(realtime ? "启动实时仿真" : "运行仿真");
+  if (!realtime) {
+    stopRealtimeSimulation();
+  }
+}
+
+function setRunButtonsText(text) {
+  const ids = ["runButton", "runButtonTop", "runButtonTopResult"];
+  ids.forEach((id) => {
+    const btn = document.getElementById(id);
+    if (btn) btn.textContent = text;
+  });
+}
+
+function buildRealtimeRuntime(config) {
+  const dt = config.dtMs / 1000;
+  return {
+    config: { ...config },
+    dt,
+    stepIndex: 0,
+    fraction: 0,
+    timer: null,
+    lastTickMs: performance.now(),
+    anglePid: new PIDController(
+      config.angleKp,
+      config.angleKi,
+      config.angleKd,
+      config.angleOutLimit,
+      config.angleIOutLimit
+    ),
+    speedPid: new PIDController(
+      config.speedKp,
+      config.speedKi,
+      config.speedKd,
+      config.speedOutLimit,
+      config.speedIOutLimit
+    ),
+    angleDeg: config.initialAngle,
+    speedRpm: config.initialSpeed,
+    time: [],
+    reference: [],
+    mainValue: [],
+    speedValue: [],
+    angleValue: [],
+    output: [],
+    currentA: [],
+    error: [],
+  };
+}
+
+function startRealtimeSimulation(config) {
+  stopRealtimeSimulation();
+  realtimeRuntime = buildRealtimeRuntime(config);
+  runRealtimeChunk(1);
+  renderRealtimeRuntime();
+  const tickMs = 33;
+  realtimeRuntime.lastTickMs = performance.now();
+  realtimeRuntime.timer = setInterval(() => {
+    const rt = realtimeRuntime;
+    if (!rt) return;
+    const now = performance.now();
+    const elapsedSec = Math.max(0, (now - rt.lastTickMs) / 1000);
+    rt.lastTickMs = now;
+    const speedFactor = Math.max(0.2, Number(rt.config.realtimeSpeed) || 1);
+    rt.fraction += (elapsedSec * speedFactor) / rt.dt;
+    const steps = Math.max(1, Math.floor(rt.fraction));
+    rt.fraction -= steps;
+    runRealtimeChunk(steps);
+    renderRealtimeRuntime();
+  }, tickMs);
+}
+
+function stopRealtimeSimulation() {
+  if (!realtimeRuntime) return;
+  if (realtimeRuntime.timer) clearInterval(realtimeRuntime.timer);
+  realtimeRuntime.timer = null;
+  realtimeRuntime = null;
+}
+
+function runRealtimeChunk(steps) {
+  const rt = realtimeRuntime;
+  if (!rt) return;
+  for (let n = 0; n < steps; n += 1) {
+    runRealtimeStep(rt);
+  }
+}
+
+function runRealtimeStep(rt) {
+  const c = rt.config;
+  const t = rt.stepIndex * rt.dt;
+  const targetAngle = c.targetAngle;
+  const targetSpeed = c.targetSpeed;
+  const disturbActive = t >= c.disturbTime;
+  const appliedLoad = c.loadTorque + (disturbActive ? c.disturbTorque : 0);
+
+  const measuredSpeed = rt.speedRpm + pseudoNoise(rt.stepIndex) * c.speedNoise;
+  const angleErrorRaw = targetAngle - rt.angleDeg;
+  const angleError = c.wrapAngle ? wrapTo180(angleErrorRaw) : angleErrorRaw;
+
+  let speedTarget = targetSpeed;
+  if (c.mode === "cascade") {
+    speedTarget = rt.anglePid.update(0, angleError);
+  }
+
+  const ctrlOutput = rt.speedPid.update(measuredSpeed, speedTarget);
+  const cmdCurrent = (ctrlOutput / Math.max(c.speedOutLimit, 1)) * c.maxCurrentA;
+  const limitedCurrent = clampSymmetric(cmdCurrent, c.maxCurrentA);
+  const torque = limitedCurrent * c.torqueConstant;
+
+  const loadDirection = Math.sign(speedTarget || c.targetSpeed || 1);
+  const equivalentTargetSpeed = (torque - appliedLoad * loadDirection) * c.speedTorqueGradient;
+  const tau = Math.max(c.mechTauMs / 1000, rt.dt);
+  rt.speedRpm += (equivalentTargetSpeed - rt.speedRpm) * (rt.dt / tau);
+  rt.angleDeg += rt.speedRpm * 6 * rt.dt;
+
+  rt.time.push(t);
+  rt.reference.push(c.mode === "cascade" ? targetAngle : targetSpeed);
+  rt.mainValue.push(c.mode === "cascade" ? rt.angleDeg : rt.speedRpm);
+  rt.speedValue.push(rt.speedRpm);
+  rt.angleValue.push(rt.angleDeg);
+  rt.output.push(ctrlOutput);
+  rt.currentA.push(limitedCurrent);
+  rt.error.push(c.mode === "cascade" ? angleError : targetSpeed - measuredSpeed);
+  rt.stepIndex += 1;
+  trimRealtimeSeries(rt);
+}
+
+function renderRealtimeRuntime() {
+  const rt = realtimeRuntime;
+  if (!rt || rt.time.length === 0) return;
+  const result = {
+    time: rt.time,
+    reference: rt.reference,
+    mainValue: rt.mainValue,
+    speedValue: rt.speedValue,
+    angleValue: rt.angleValue,
+    output: rt.output,
+    currentA: rt.currentA,
+    error: rt.error,
+    metrics: calculateMetrics(rt.config, rt.time, rt.reference, rt.mainValue),
+  };
+  renderMetrics(rt.config, result);
+  renderCharts(rt.config, result);
+}
+
+function updateRealtimeTargets() {
+  if (!realtimeRuntime) return;
+  const latest = readValues();
+  realtimeRuntime.config.targetAngle = latest.targetAngle;
+  realtimeRuntime.config.targetSpeed = latest.targetSpeed;
+  realtimeRuntime.config.realtimeSpeed = latest.realtimeSpeed;
+  realtimeRuntime.config.realtimeWindowSec = latest.realtimeWindowSec;
+  realtimeRuntime.config.wrapAngle = latest.wrapAngle;
+}
+
+function trimRealtimeSeries(rt) {
+  const windowSec = Math.max(1, Number(rt.config.realtimeWindowSec) || 8);
+  const maxPoints = Math.max(64, Math.ceil((windowSec / rt.dt) * 1.2));
+  if (rt.time.length <= maxPoints) return;
+  const removeCount = rt.time.length - maxPoints;
+  rt.time.splice(0, removeCount);
+  rt.reference.splice(0, removeCount);
+  rt.mainValue.splice(0, removeCount);
+  rt.speedValue.splice(0, removeCount);
+  rt.angleValue.splice(0, removeCount);
+  rt.output.splice(0, removeCount);
+  rt.currentA.splice(0, removeCount);
+  rt.error.splice(0, removeCount);
 }
 
 function simulate(config) {
@@ -338,8 +533,11 @@ function renderMetrics(config, result) {
     )
     .join("");
 }
-
 function renderCharts(config, result) {
+  const xWindowSec = config.simMode === "realtime"
+    ? Math.max(1, Number(config.realtimeWindowSec) || 8)
+    : null;
+
   drawLineChart(canvases.main, {
     labels: result.time,
     series: [
@@ -354,7 +552,7 @@ function renderCharts(config, result) {
         values: result.mainValue,
       },
     ].filter(Boolean),
-  });
+  }, null, { xWindowSec });
 
   drawLineChart(canvases.output, {
     labels: result.time,
@@ -362,15 +560,14 @@ function renderCharts(config, result) {
       { label: "PID 输出", color: "#7c3aed", values: result.output },
       { label: "等效电流(A)", color: "#1f7a4f", values: result.currentA },
     ],
-  });
+  }, null, { xWindowSec });
 
   drawLineChart(canvases.error, {
     labels: result.time,
     series: [{ label: "误差", color: "#a55d14", values: result.error }],
-  });
+  }, null, { xWindowSec });
 }
-
-function drawLineChart(canvas, data, hoverIndex = null) {
+function drawLineChart(canvas, data, hoverIndex = null, options = {}) {
   const ctx = canvas.getContext("2d");
   const width = canvas.width;
   const height = canvas.height;
@@ -382,9 +579,34 @@ function drawLineChart(canvas, data, hoverIndex = null) {
   ctx.fillStyle = "#fffaf2";
   ctx.fillRect(0, 0, width, height);
 
-  const allValues = data.series.flatMap((series) => series.values);
-  let minY = Math.min(...allValues);
-  let maxY = Math.max(...allValues);
+  let minX = data.labels[0] ?? 0;
+  let maxX = data.labels[data.labels.length - 1] ?? 1;
+  if (options.xWindowSec != null) {
+    const win = Math.max(1e-6, options.xWindowSec);
+    const lastX = data.labels[data.labels.length - 1] ?? 0;
+    if (lastX <= win) {
+      minX = 0;
+      maxX = win;
+    } else {
+      maxX = lastX;
+      minX = lastX - win;
+    }
+  }
+
+  const visibleValues = [];
+  for (const series of data.series) {
+    for (let i = 0; i < data.labels.length; i += 1) {
+      const t = data.labels[i];
+      if (t >= minX && t <= maxX) {
+        visibleValues.push(series.values[i]);
+      }
+    }
+  }
+  const valuesForScale = visibleValues.length > 0
+    ? visibleValues
+    : data.series.flatMap((series) => series.values);
+  let minY = Math.min(...valuesForScale);
+  let maxY = Math.max(...valuesForScale);
   if (minY === maxY) {
     minY -= 1;
     maxY += 1;
@@ -393,10 +615,8 @@ function drawLineChart(canvas, data, hoverIndex = null) {
   minY -= yPad;
   maxY += yPad;
 
-  const minX = data.labels[0] ?? 0;
-  const maxX = data.labels[data.labels.length - 1] ?? 1;
   const safeXSpan = Math.max(maxX - minX, 1e-9);
-  chartState.set(canvas.id, { data, minX, maxX, minY, maxY, padding, plotWidth, plotHeight, safeXSpan });
+  chartState.set(canvas.id, { data, minX, maxX, minY, maxY, padding, plotWidth, plotHeight, safeXSpan, options });
 
   ctx.strokeStyle = "rgba(107, 114, 128, 0.22)";
   ctx.lineWidth = 1;
@@ -429,6 +649,10 @@ function drawLineChart(canvas, data, hoverIndex = null) {
     ctx.fillText(format(value, 2), x, height - 8);
   }
 
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(padding.left, padding.top, plotWidth, plotHeight);
+  ctx.clip();
   for (const series of data.series) {
     ctx.strokeStyle = series.color;
     ctx.lineWidth = 2.2;
@@ -444,6 +668,7 @@ function drawLineChart(canvas, data, hoverIndex = null) {
     });
     ctx.stroke();
   }
+  ctx.restore();
 
   if (hoverIndex != null && hoverIndex >= 0 && hoverIndex < data.labels.length) {
     const hoverX = padding.left + ((data.labels[hoverIndex] - minX) / safeXSpan) * plotWidth;
@@ -490,20 +715,21 @@ function bindChartInteraction(canvas) {
     const minPlotX = state.padding.left;
     const maxPlotX = canvas.width - state.padding.right;
     if (x < minPlotX || x > maxPlotX) {
-      drawLineChart(canvas, state.data);
+      drawLineChart(canvas, state.data, null, state.options || {});
       hideChartTooltip();
       return;
     }
 
     const ratio = (x - minPlotX) / (maxPlotX - minPlotX);
-    const index = Math.max(0, Math.min(state.data.labels.length - 1, Math.round(ratio * (state.data.labels.length - 1))));
-    drawLineChart(canvas, state.data, index);
+    const xValue = state.minX + ratio * state.safeXSpan;
+    const index = findNearestLabelIndex(state.data.labels, xValue);
+    drawLineChart(canvas, state.data, index, state.options || {});
     showChartTooltip(state.data, index, event.clientX, event.clientY);
   });
 
   canvas.addEventListener("mouseleave", () => {
     const state = chartState.get(canvas.id);
-    if (state) drawLineChart(canvas, state.data);
+    if (state) drawLineChart(canvas, state.data, null, state.options || {});
     hideChartTooltip();
   });
 }
@@ -561,3 +787,21 @@ function pseudoNoise(index) {
 function format(value, digits) {
   return Number.isFinite(value) ? value.toFixed(digits) : "--";
 }
+
+function findNearestLabelIndex(labels, target) {
+  if (!labels.length) return 0;
+  let lo = 0;
+  let hi = labels.length - 1;
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (labels[mid] < target) {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
+  }
+  if (lo === 0) return 0;
+  const prev = lo - 1;
+  return Math.abs(labels[lo] - target) < Math.abs(labels[prev] - target) ? lo : prev;
+}
+

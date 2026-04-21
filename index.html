@@ -40,6 +40,14 @@
         </div>
 
         <label class="field">
+          <span>仿真模式</span>
+          <select id="simMode">
+            <option value="realtime">实时模式</option>
+            <option value="static">静态模式</option>
+          </select>
+        </label>
+
+        <label class="field">
           <span>模式</span>
           <select id="mode">
             <option value="cascade">角度环 + 速度环</option>
@@ -56,6 +64,30 @@
             <span>目标速度 (rpm)</span>
             <input id="targetSpeed" type="number" value="120" step="1">
           </label>
+        </div>
+
+        <div class="group realtime-only">
+          <h3>实时模式</h3>
+          <div class="grid two">
+            <label class="field">
+              <span>波形速度 (倍速)</span>
+              <input id="realtimeSpeed" type="number" value="1" min="0.2" max="20" step="0.1">
+            </label>
+            <label class="field">
+              <span>时间窗口 (s)</span>
+              <input id="realtimeWindowSec" type="number" value="8" min="1" max="120" step="0.5">
+            </label>
+          </div>
+          <div class="grid two rt-update-row">
+            <div class="field">
+              <span>&nbsp;</span>
+              <div></div>
+            </div>
+            <div class="field rt-update-action">
+              <span>&nbsp;</span>
+              <button id="updateRtButton" class="primary">更新目标</button>
+            </div>
+          </div>
         </div>
 
         <div class="group">
