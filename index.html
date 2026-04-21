@@ -9,12 +9,15 @@
 <body>
   <main class="app-shell">
     <section class="hero">
-      <div>
-        <p class="eyebrow">GM6020 Motor Simulation</p>
-        <h1>GM6020 PID 仿真器</h1>
+      <div class="hero-main">
+        <div>
+          <p class="eyebrow">GM6020 MOTOR SIMULATION</p>
+          <h1>GM6020 PID 仿真器</h1>
+        </div>
+        <button id="runButtonTop" class="primary top-run">运行仿真</button>
       </div>
       <div class="hero-card">
-        <div class="spec-grid">
+        <div class="spec-grid horizontal-specs">
           <div><span>电机</span><strong>GM6020</strong></div>
           <div><span>额定电压</span><strong>24V</strong></div>
           <div><span>转矩常数</span><strong>0.741 N·m/A</strong></div>
@@ -62,7 +65,7 @@
             <label class="field"><span>Ki</span><input id="angleKi" type="number" value="0" step="0.0001"></label>
             <label class="field"><span>Kd</span><input id="angleKd" type="number" value="0" step="0.01"></label>
             <label class="field"><span>输出限幅</span><input id="angleOutLimit" type="number" value="720" step="1"></label>
-            <label class="field"><span>积分限幅</span><input id="angleIOutLimit" type="number" value="0" step="1"></label>
+            <label class="field"><span>积分限幅 (0=禁用积分)</span><input id="angleIOutLimit" type="number" value="1000" step="1"></label>
           </div>
         </div>
 
@@ -73,7 +76,7 @@
             <label class="field"><span>Ki</span><input id="speedKi" type="number" value="0.9" step="0.0001"></label>
             <label class="field"><span>Kd</span><input id="speedKd" type="number" value="0" step="0.01"></label>
             <label class="field"><span>输出限幅</span><input id="speedOutLimit" type="number" value="16384" step="1"></label>
-            <label class="field"><span>积分限幅</span><input id="speedIOutLimit" type="number" value="10000" step="1"></label>
+            <label class="field"><span>积分限幅 (0=禁用积分)</span><input id="speedIOutLimit" type="number" value="10000" step="1"></label>
           </div>
         </div>
 
@@ -109,23 +112,24 @@
       <section class="panel results">
         <div class="panel-head">
           <h2>响应结果</h2>
+          <button id="runButtonTopResult" class="primary">运行仿真</button>
         </div>
 
         <div class="metrics" id="metrics"></div>
 
         <div class="chart-block">
           <div class="chart-title">主响应曲线</div>
-          <canvas id="mainChart" width="920" height="340"></canvas>
+          <canvas id="mainChart" width="920" height="250"></canvas>
         </div>
 
         <div class="chart-grid">
           <div class="chart-block">
             <div class="chart-title">控制器输出 / 电流</div>
-            <canvas id="outputChart" width="440" height="260"></canvas>
+            <canvas id="outputChart" width="440" height="180"></canvas>
           </div>
           <div class="chart-block">
             <div class="chart-title">误差曲线</div>
-            <canvas id="errorChart" width="440" height="260"></canvas>
+            <canvas id="errorChart" width="440" height="180"></canvas>
           </div>
         </div>
       </section>

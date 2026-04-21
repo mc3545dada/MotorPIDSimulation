@@ -37,7 +37,7 @@ const defaults = {
   angleKi: 0,
   angleKd: 0,
   angleOutLimit: 720,
-  angleIOutLimit: 0,
+  angleIOutLimit: 1000,
   speedKp: 60,
   speedKi: 0.9,
   speedKd: 0,
@@ -68,7 +68,7 @@ const presets = {
     angleKi: 0,
     angleKd: 0,
     angleOutLimit: 720,
-    angleIOutLimit: 0,
+    angleIOutLimit: 1000,
     speedKp: 60,
     speedKi: 0.9,
     speedKd: 0,
@@ -83,7 +83,7 @@ const presets = {
     angleKi: 0,
     angleKd: 0,
     angleOutLimit: 210,
-    angleIOutLimit: 0,
+    angleIOutLimit: 1000,
     speedKp: 80,
     speedKi: 0.5,
     speedKd: 0,
@@ -98,7 +98,7 @@ const presets = {
     angleKi: 0,
     angleKd: 0,
     angleOutLimit: 720,
-    angleIOutLimit: 0,
+    angleIOutLimit: 1000,
     speedKp: 60,
     speedKi: 0.9,
     speedKd: 0,
@@ -118,6 +118,10 @@ const canvases = {
 };
 
 document.getElementById("runButton").addEventListener("click", runSimulation);
+const runButtonTop = document.getElementById("runButtonTop");
+if (runButtonTop) runButtonTop.addEventListener("click", runSimulation);
+const runButtonTopResult = document.getElementById("runButtonTopResult");
+if (runButtonTopResult) runButtonTopResult.addEventListener("click", runSimulation);
 document.getElementById("resetButton").addEventListener("click", () => {
   applyValues(defaults);
   runSimulation();

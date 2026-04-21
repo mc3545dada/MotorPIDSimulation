@@ -1,5 +1,5 @@
 :root {
-  --bg: #f6f1e7;
+  --bg: #07131f;
   --surface: #fffaf1;
   --surface-2: #f2e6d5;
   --ink: #1f2933;
@@ -19,24 +19,30 @@ body {
   margin: 0;
   font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   color: var(--ink);
+  min-height: 100vh;
+  overflow: hidden;
   background:
-    radial-gradient(circle at top left, rgba(180, 73, 45, 0.18), transparent 24%),
-    radial-gradient(circle at top right, rgba(20, 91, 115, 0.18), transparent 22%),
-    linear-gradient(180deg, #fbf7ef 0%, var(--bg) 100%);
+    radial-gradient(circle at 10% 10%, rgba(34, 211, 238, 0.2), transparent 26%),
+    radial-gradient(circle at 90% 20%, rgba(37, 99, 235, 0.18), transparent 24%),
+    linear-gradient(180deg, #081423 0%, var(--bg) 100%);
 }
 
 .app-shell {
   width: min(1400px, calc(100vw - 32px));
   margin: 0 auto;
-  padding: 24px 0 40px;
+  padding: 12px 0;
+  height: 100vh;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 12px;
 }
 
 .hero {
   display: grid;
   grid-template-columns: 1.4fr 1fr;
   gap: 20px;
-  align-items: stretch;
-  margin-bottom: 20px;
+  align-items: start;
+  margin-bottom: 0;
 }
 
 .hero,
@@ -49,7 +55,20 @@ body {
 }
 
 .hero {
-  padding: 28px;
+  padding: 18px;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.hero-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.top-run {
+  min-width: 120px;
 }
 
 .eyebrow {
@@ -68,7 +87,7 @@ h3 {
 }
 
 h1 {
-  font-size: clamp(28px, 4vw, 44px);
+  font-size: clamp(24px, 3.1vw, 42px);
 }
 
 .hero-copy {
@@ -81,19 +100,20 @@ h1 {
 .hero-card {
   background: linear-gradient(160deg, rgba(180, 73, 45, 0.09), rgba(20, 91, 115, 0.09));
   border-radius: 18px;
-  padding: 18px;
+  padding: 12px;
 }
 
 .spec-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
+  gap: 10px;
 }
 
 .spec-grid div {
-  padding: 12px;
+  padding: 10px;
   background: rgba(255, 255, 255, 0.68);
   border-radius: 14px;
+  border: 1px solid rgba(212, 194, 168, 0.75);
 }
 
 .spec-grid span {
@@ -103,14 +123,21 @@ h1 {
   margin-bottom: 6px;
 }
 
+.horizontal-specs {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
 .layout {
   display: grid;
   grid-template-columns: 420px minmax(0, 1fr);
   gap: 20px;
+  min-height: 0;
 }
 
 .panel {
-  padding: 22px;
+  padding: 16px;
+  min-height: 0;
+  overflow: auto;
 }
 
 .panel-head {
@@ -118,7 +145,7 @@ h1 {
   justify-content: space-between;
   align-items: flex-start;
   gap: 12px;
-  margin-bottom: 18px;
+  margin-bottom: 12px;
 }
 
 .panel-head p {
@@ -136,8 +163,8 @@ h1 {
 }
 
 .group {
-  margin-top: 18px;
-  padding-top: 16px;
+  margin-top: 12px;
+  padding-top: 12px;
   border-top: 1px solid var(--line);
 }
 
@@ -212,12 +239,12 @@ button.primary {
 .metrics {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-  margin-bottom: 18px;
+  gap: 10px;
+  margin-bottom: 10px;
 }
 
 .metric-card {
-  padding: 14px;
+  padding: 10px;
   border-radius: 16px;
   background: linear-gradient(160deg, rgba(255, 255, 255, 0.95), rgba(242, 230, 213, 0.85));
   border: 1px solid rgba(212, 194, 168, 0.75);
@@ -230,7 +257,7 @@ button.primary {
 }
 
 .metric-value {
-  font-size: 22px;
+  font-size: 20px;
   font-weight: 700;
 }
 
@@ -243,19 +270,19 @@ button.primary {
 .chart-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
+  gap: 10px;
 }
 
 .chart-block {
-  margin-bottom: 14px;
-  padding: 14px;
+  margin-bottom: 10px;
+  padding: 10px;
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.62);
   border: 1px solid rgba(212, 194, 168, 0.75);
 }
 
 .chart-title {
-  margin-bottom: 10px;
+  margin-bottom: 6px;
   font-weight: 600;
 }
 
@@ -281,10 +308,24 @@ canvas {
 }
 
 @media (max-width: 1100px) {
+  body {
+    overflow: auto;
+  }
+
+  .app-shell {
+    height: auto;
+    display: block;
+    padding: 10px 0 20px;
+  }
+
   .hero,
   .layout,
   .chart-grid {
     grid-template-columns: 1fr;
+  }
+
+  .horizontal-specs {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .metrics {
@@ -295,7 +336,7 @@ canvas {
 @media (max-width: 640px) {
   .app-shell {
     width: min(100vw - 20px, 100%);
-    padding-top: 10px;
+    padding-top: 6px;
   }
 
   .hero,
@@ -304,9 +345,22 @@ canvas {
     border-radius: 18px;
   }
 
+  .hero-main {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .top-run {
+    width: 100%;
+  }
+
   .grid.two,
   .metrics {
     grid-template-columns: 1fr;
+  }
+
+  .horizontal-specs {
+    grid-template-columns: 1fr 1fr;
   }
 
   h1 {
