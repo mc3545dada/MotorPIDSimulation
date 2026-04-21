@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GM6020 PID仿真器</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main class="app-shell">
+    <section class="hero">
+      <div>
+        <p class="eyebrow">GM6020 Motor Simulation</p>
+        <h1>GM6020 PID 仿真器</h1>
+      </div>
+      <div class="hero-card">
+        <div class="spec-grid">
+          <div><span>电机</span><strong>GM6020</strong></div>
+          <div><span>额定电压</span><strong>24V</strong></div>
+          <div><span>转矩常数</span><strong>0.741 N·m/A</strong></div>
+          <div><span>电流映射</span><strong>±16384 -> ±3A</strong></div>
+          <div><span>空载最高转速</span><strong>320 rpm</strong></div>
+          <div><span>机械时间常数</span><strong>3 ms</strong></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="layout">
+      <aside class="panel controls">
+        <div class="panel-head">
+          <h2>控制参数</h2>
+          <div class="preset-row">
+            <button data-preset="yaw">预设A</button>
+            <button data-preset="pitch">预设B</button>
+            <button data-preset="speed">速度环</button>
+          </div>
+        </div>
+
+        <label class="field">
+          <span>模式</span>
+          <select id="mode">
+            <option value="cascade">角度环 + 速度环</option>
+            <option value="speed">仅速度环</option>
+          </select>
+        </label>
+
+        <div class="grid two">
+          <label class="field">
+            <span>目标角度 (deg)</span>
+            <input id="targetAngle" type="number" value="90" step="1">
+          </label>
+          <label class="field">
+            <span>目标速度 (rpm)</span>
+            <input id="targetSpeed" type="number" value="120" step="1">
+          </label>
+        </div>
+
+        <div class="group">
+          <h3>角度环 PID</h3>
+          <div class="grid two">
+            <label class="field"><span>Kp</span><input id="angleKp" type="number" value="15" step="0.01"></label>
+            <label class="field"><span>Ki</span><input id="angleKi" type="number" value="0" step="0.0001"></label>
+            <label class="field"><span>Kd</span><input id="angleKd" type="number" value="0" step="0.01"></label>
+            <label class="field"><span>输出限幅</span><input id="angleOutLimit" type="number" value="720" step="1"></label>
+            <label class="field"><span>积分限幅</span><input id="angleIOutLimit" type="number" value="0" step="1"></label>
+          </div>
+        </div>
+
+        <div class="group">
+          <h3>速度环 PID</h3>
+          <div class="grid two">
+            <label class="field"><span>Kp</span><input id="speedKp" type="number" value="60" step="0.01"></label>
+            <label class="field"><span>Ki</span><input id="speedKi" type="number" value="0.9" step="0.0001"></label>
+            <label class="field"><span>Kd</span><input id="speedKd" type="number" value="0" step="0.01"></label>
+            <label class="field"><span>输出限幅</span><input id="speedOutLimit" type="number" value="16384" step="1"></label>
+            <label class="field"><span>积分限幅</span><input id="speedIOutLimit" type="number" value="10000" step="1"></label>
+          </div>
+        </div>
+
+        <div class="group">
+          <h3>模型参数</h3>
+          <div class="grid two">
+            <label class="field"><span>仿真时长 (s)</span><input id="simTime" type="number" value="3" min="0.5" step="0.1"></label>
+            <label class="field"><span>采样周期 (ms)</span><input id="dtMs" type="number" value="1" min="1" step="1"></label>
+            <label class="field"><span>最大电流 (A)</span><input id="maxCurrentA" type="number" value="3" step="0.1"></label>
+            <label class="field"><span>转矩常数 (N·m/A)</span><input id="torqueConstant" type="number" value="0.741" step="0.001"></label>
+            <label class="field"><span>转速转矩梯度 (rpm/N·m)</span><input id="speedTorqueGradient" type="number" value="156" step="1"></label>
+            <label class="field"><span>机械时间常数 (ms)</span><input id="mechTauMs" type="number" value="3" min="1" step="1"></label>
+            <label class="field"><span>初始角度 (deg)</span><input id="initialAngle" type="number" value="0" step="1"></label>
+            <label class="field"><span>初始速度 (rpm)</span><input id="initialSpeed" type="number" value="0" step="1"></label>
+            <label class="field"><span>恒定负载 (N·m)</span><input id="loadTorque" type="number" value="0.15" step="0.01"></label>
+            <label class="field"><span>扰动开始时间 (s)</span><input id="disturbTime" type="number" value="1.2" step="0.1"></label>
+            <label class="field"><span>扰动附加负载 (N·m)</span><input id="disturbTorque" type="number" value="0" step="0.01"></label>
+            <label class="field"><span>测速噪声 (rpm)</span><input id="speedNoise" type="number" value="0" step="0.1"></label>
+          </div>
+        </div>
+
+        <div class="group inline-options">
+          <label><input id="wrapAngle" type="checkbox" checked> 角度误差按 ±180° 回绕</label>
+          <label><input id="showReference" type="checkbox" checked> 显示参考值曲线</label>
+        </div>
+
+        <div class="action-row">
+          <button id="runButton" class="primary">运行仿真</button>
+          <button id="resetButton">恢复默认</button>
+        </div>
+      </aside>
+
+      <section class="panel results">
+        <div class="panel-head">
+          <h2>响应结果</h2>
+        </div>
+
+        <div class="metrics" id="metrics"></div>
+
+        <div class="chart-block">
+          <div class="chart-title">主响应曲线</div>
+          <canvas id="mainChart" width="920" height="340"></canvas>
+        </div>
+
+        <div class="chart-grid">
+          <div class="chart-block">
+            <div class="chart-title">控制器输出 / 电流</div>
+            <canvas id="outputChart" width="440" height="260"></canvas>
+          </div>
+          <div class="chart-block">
+            <div class="chart-title">误差曲线</div>
+            <canvas id="errorChart" width="440" height="260"></canvas>
+          </div>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <script src="./app.js"></script>
+</body>
+</html>
