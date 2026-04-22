@@ -2,6 +2,7 @@
 
 一个面向入门学习者的 GM6020 电机 PID 网页仿真工具。  
 项目重点是帮助 STM32 电机控制初学者理解「位置环 + 速度环」的调参过程与响应变化。
+快速开始：https://mc3545dada.github.io/MotorPIDSimulation/
 
 ## 功能概览
 
