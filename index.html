@@ -14,7 +14,6 @@
           <p class="eyebrow">GM6020 MOTOR SIMULATION</p>
           <h1>GM6020 PID 仿真器</h1>
         </div>
-        <button id="runButtonTop" class="primary top-run">运行仿真</button>
       </div>
       <div class="hero-card">
         <div class="spec-grid horizontal-specs">
@@ -78,6 +77,24 @@
               <input id="realtimeWindowSec" type="number" value="8" min="1" max="120" step="0.5">
             </label>
           </div>
+          <div class="grid two">
+            <label class="field">
+              <span>外部阶跃上目标</span>
+              <input id="extStepHigh" type="number" value="90" step="1">
+            </label>
+            <label class="field">
+              <span>外部阶跃下目标</span>
+              <input id="extStepLow" type="number" value="0" step="1">
+            </label>
+            <label class="field">
+              <span>阶跃周期 (s)</span>
+              <input id="extStepPeriodSec" type="number" value="1.5" min="0.05" step="0.1">
+            </label>
+            <label class="field">
+              <span>&nbsp;</span>
+              <button id="extStepButton" class="primary">启用外部阶跃</button>
+            </label>
+          </div>
           <div class="grid two rt-update-row">
             <div class="field">
               <span>&nbsp;</span>
@@ -109,6 +126,10 @@
             <label class="field"><span>Kd</span><input id="speedKd" type="number" value="0" step="0.01"></label>
             <label class="field"><span>输出限幅</span><input id="speedOutLimit" type="number" value="16384" step="1"></label>
             <label class="field"><span>积分限幅 (0=禁用积分)</span><input id="speedIOutLimit" type="number" value="10000" step="1"></label>
+            <label class="field"><span>前馈增益 (输出/rpm)</span><input id="speedFeedforwardGain" type="number" value="0" step="0.01"></label>
+          </div>
+          <div class="inline-options">
+            <label><input id="speedFeedforwardEnable" type="checkbox"> 启用速度前馈</label>
           </div>
         </div>
 
@@ -132,11 +153,9 @@
 
         <div class="group inline-options">
           <label><input id="wrapAngle" type="checkbox" checked> 角度误差按 ±180° 回绕</label>
-          <label><input id="showReference" type="checkbox" checked> 显示参考值曲线</label>
         </div>
 
         <div class="action-row">
-          <button id="runButton" class="primary">运行仿真</button>
           <button id="resetButton">恢复默认</button>
         </div>
       </aside>
@@ -150,7 +169,15 @@
         <div class="metrics" id="metrics"></div>
 
         <div class="chart-block">
-          <div class="chart-title">主响应曲线</div>
+          <div class="panel-head main-chart-head">
+            <div class="chart-title">主响应曲线</div>
+            <div class="main-series-toggles">
+              <label><input id="showMainTargetSpeed" type="checkbox" checked> 目标速度</label>
+              <label><input id="showMainActualSpeed" type="checkbox" checked> 当前速度</label>
+              <label><input id="showMainTargetAngle" type="checkbox" checked> 目标角度</label>
+              <label><input id="showMainActualAngle" type="checkbox" checked> 当前角度</label>
+            </div>
+          </div>
           <canvas id="mainChart" width="920" height="250"></canvas>
         </div>
 

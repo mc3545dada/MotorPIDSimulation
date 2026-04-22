@@ -298,6 +298,26 @@ button.primary {
   font-weight: 600;
 }
 
+.main-chart-head {
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.main-series-toggles {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: #334155;
+}
+
+.main-series-toggles label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
 canvas {
   width: 100%;
   height: auto;

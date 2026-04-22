@@ -34,6 +34,9 @@ const defaults = {
   mode: "cascade",
   realtimeSpeed: 1,
   realtimeWindowSec: 8,
+  extStepHigh: 90,
+  extStepLow: 0,
+  extStepPeriodSec: 1.5,
   targetAngle: 90,
   targetSpeed: 120,
   angleKp: 15,
@@ -44,6 +47,8 @@ const defaults = {
   speedKp: 60,
   speedKi: 0.9,
   speedKd: 0,
+  speedFeedforwardEnable: false,
+  speedFeedforwardGain: 0,
   speedOutLimit: 16384,
   speedIOutLimit: 10000,
   simTime: 3,
@@ -54,12 +59,15 @@ const defaults = {
   mechTauMs: 3,
   initialAngle: 0,
   initialSpeed: 0,
-  loadTorque: 0.15,
+  loadTorque: 0,
   disturbTime: 1.2,
   disturbTorque: 0,
   speedNoise: 0,
   wrapAngle: true,
-  showReference: true,
+  showMainTargetAngle: true,
+  showMainActualAngle: true,
+  showMainTargetSpeed: true,
+  showMainActualSpeed: true,
 };
 
 const presets = {
@@ -82,13 +90,13 @@ const presets = {
     mode: "cascade",
     targetAngle: 45,
     targetSpeed: 100,
-    angleKp: 16,
+    angleKp: 0,
     angleKi: 0,
     angleKd: 0,
-    angleOutLimit: 210,
+    angleOutLimit: 720,
     angleIOutLimit: 1000,
-    speedKp: 80,
-    speedKi: 0.5,
+    speedKp: 0,
+    speedKi: 0,
     speedKd: 0,
     speedOutLimit: 16384,
     speedIOutLimit: 10000,
@@ -122,14 +130,14 @@ const canvases = {
 const chartState = new Map();
 const tooltipEl = createChartTooltip();
 let realtimeRuntime = null;
+let lastRenderSnapshot = null;
 
-document.getElementById("runButton").addEventListener("click", runSimulation);
-const runButtonTop = document.getElementById("runButtonTop");
-if (runButtonTop) runButtonTop.addEventListener("click", runSimulation);
 const runButtonTopResult = document.getElementById("runButtonTopResult");
 if (runButtonTopResult) runButtonTopResult.addEventListener("click", runSimulation);
 const updateRtButton = document.getElementById("updateRtButton");
 if (updateRtButton) updateRtButton.addEventListener("click", updateRealtimeTargets);
+const extStepButton = document.getElementById("extStepButton");
+if (extStepButton) extStepButton.addEventListener("click", toggleExternalStep);
 document.getElementById("resetButton").addEventListener("click", () => {
   stopRealtimeSimulation();
   applyValues(defaults);
@@ -150,6 +158,7 @@ const simModeEl = document.getElementById("simMode");
 if (simModeEl) {
   simModeEl.addEventListener("change", updateModeUI);
 }
+bindMainSeriesToggleRepaint();
 updateModeUI();
 runSimulation();
 
@@ -178,6 +187,8 @@ function readValues() {
 }
 
 function runSimulation() {
+  hideChartTooltip();
+  chartState.clear();
   const config = readValues();
   if (config.simMode === "realtime") {
     startRealtimeSimulation(config);
@@ -186,9 +197,9 @@ function runSimulation() {
 
   stopRealtimeSimulation();
   const result = simulate(config);
+  lastRenderSnapshot = { config: { ...config }, result };
   renderMetrics(config, result);
   renderCharts(config, result);
-  hideChartTooltip();
 }
 
 function updateModeUI() {
@@ -198,13 +209,14 @@ function updateModeUI() {
     el.style.display = realtime ? "block" : "none";
   });
   setRunButtonsText(realtime ? "启动实时仿真" : "运行仿真");
+  setStepButtonText(realtimeRuntime?.stepGen?.enabled ?? false);
   if (!realtime) {
     stopRealtimeSimulation();
   }
 }
 
 function setRunButtonsText(text) {
-  const ids = ["runButton", "runButtonTop", "runButtonTopResult"];
+  const ids = ["runButtonTopResult"];
   ids.forEach((id) => {
     const btn = document.getElementById(id);
     if (btn) btn.textContent = text;
@@ -220,6 +232,11 @@ function buildRealtimeRuntime(config) {
     fraction: 0,
     timer: null,
     lastTickMs: performance.now(),
+    stepGen: {
+      enabled: false,
+      highPhase: true,
+      anchorTime: 0,
+    },
     anglePid: new PIDController(
       config.angleKp,
       config.angleKi,
@@ -237,7 +254,9 @@ function buildRealtimeRuntime(config) {
     angleDeg: config.initialAngle,
     speedRpm: config.initialSpeed,
     time: [],
+    targetAngleSeries: [],
     reference: [],
+    targetSpeedSeries: [],
     mainValue: [],
     speedValue: [],
     angleValue: [],
@@ -250,6 +269,7 @@ function buildRealtimeRuntime(config) {
 function startRealtimeSimulation(config) {
   stopRealtimeSimulation();
   realtimeRuntime = buildRealtimeRuntime(config);
+  setStepButtonText(realtimeRuntime.stepGen.enabled);
   runRealtimeChunk(1);
   renderRealtimeRuntime();
   const tickMs = 33;
@@ -274,6 +294,7 @@ function stopRealtimeSimulation() {
   if (realtimeRuntime.timer) clearInterval(realtimeRuntime.timer);
   realtimeRuntime.timer = null;
   realtimeRuntime = null;
+  setStepButtonText(false);
 }
 
 function runRealtimeChunk(steps) {
@@ -287,12 +308,29 @@ function runRealtimeChunk(steps) {
 function runRealtimeStep(rt) {
   const c = rt.config;
   const t = rt.stepIndex * rt.dt;
-  const targetAngle = c.targetAngle;
-  const targetSpeed = c.targetSpeed;
+  const period = Math.max(0.05, Number(c.extStepPeriodSec) || 1.5);
+  if (rt.stepGen.enabled) {
+    while (t - rt.stepGen.anchorTime >= period) {
+      rt.stepGen.anchorTime += period;
+      rt.stepGen.highPhase = !rt.stepGen.highPhase;
+    }
+  }
+
+  const stepTarget = rt.stepGen.highPhase ? c.extStepHigh : c.extStepLow;
+  let targetAngle = c.targetAngle;
+  let targetSpeed = c.targetSpeed;
+  if (rt.stepGen.enabled) {
+    if (c.mode === "cascade") {
+      targetAngle = stepTarget;
+    } else {
+      targetSpeed = stepTarget;
+    }
+  }
   const disturbActive = t >= c.disturbTime;
   const appliedLoad = c.loadTorque + (disturbActive ? c.disturbTorque : 0);
 
-  const measuredSpeed = rt.speedRpm + pseudoNoise(rt.stepIndex) * c.speedNoise;
+  const measuredSpeedRaw = rt.speedRpm + pseudoNoise(rt.stepIndex) * c.speedNoise;
+  const measuredSpeed = Math.round(measuredSpeedRaw);
   const angleErrorRaw = targetAngle - rt.angleDeg;
   const angleError = c.wrapAngle ? wrapTo180(angleErrorRaw) : angleErrorRaw;
 
@@ -301,25 +339,29 @@ function runRealtimeStep(rt) {
     speedTarget = rt.anglePid.update(0, angleError);
   }
 
-  const ctrlOutput = rt.speedPid.update(measuredSpeed, speedTarget);
+  const pidOut = rt.speedPid.update(measuredSpeedRaw, speedTarget);
+  const ffOut = c.speedFeedforwardEnable ? c.speedFeedforwardGain * speedTarget : 0;
+  const ctrlOutput = clampSymmetric(pidOut + ffOut, c.speedOutLimit);
   const cmdCurrent = (ctrlOutput / Math.max(c.speedOutLimit, 1)) * c.maxCurrentA;
   const limitedCurrent = clampSymmetric(cmdCurrent, c.maxCurrentA);
   const torque = limitedCurrent * c.torqueConstant;
 
-  const loadDirection = Math.sign(speedTarget || c.targetSpeed || 1);
+  const loadDirection = getLoadOpposeDirection(rt.speedRpm, torque);
   const equivalentTargetSpeed = (torque - appliedLoad * loadDirection) * c.speedTorqueGradient;
   const tau = Math.max(c.mechTauMs / 1000, rt.dt);
   rt.speedRpm += (equivalentTargetSpeed - rt.speedRpm) * (rt.dt / tau);
   rt.angleDeg += rt.speedRpm * 6 * rt.dt;
 
   rt.time.push(t);
+  rt.targetAngleSeries.push(targetAngle);
   rt.reference.push(c.mode === "cascade" ? targetAngle : targetSpeed);
-  rt.mainValue.push(c.mode === "cascade" ? rt.angleDeg : rt.speedRpm);
-  rt.speedValue.push(rt.speedRpm);
+  rt.targetSpeedSeries.push(speedTarget);
+  rt.mainValue.push(c.mode === "cascade" ? rt.angleDeg : measuredSpeed);
+  rt.speedValue.push(measuredSpeed);
   rt.angleValue.push(rt.angleDeg);
   rt.output.push(ctrlOutput);
   rt.currentA.push(limitedCurrent);
-  rt.error.push(c.mode === "cascade" ? angleError : targetSpeed - measuredSpeed);
+  rt.error.push(c.mode === "cascade" ? angleError : targetSpeed - measuredSpeedRaw);
   rt.stepIndex += 1;
   trimRealtimeSeries(rt);
 }
@@ -329,7 +371,9 @@ function renderRealtimeRuntime() {
   if (!rt || rt.time.length === 0) return;
   const result = {
     time: rt.time,
+    targetAngleSeries: rt.targetAngleSeries,
     reference: rt.reference,
+    targetSpeedSeries: rt.targetSpeedSeries,
     mainValue: rt.mainValue,
     speedValue: rt.speedValue,
     angleValue: rt.angleValue,
@@ -338,18 +382,45 @@ function renderRealtimeRuntime() {
     error: rt.error,
     metrics: calculateMetrics(rt.config, rt.time, rt.reference, rt.mainValue),
   };
+  const viewConfig = { ...rt.config, ...readMainSeriesToggleValues() };
+  lastRenderSnapshot = { config: { ...viewConfig }, result };
   renderMetrics(rt.config, result);
-  renderCharts(rt.config, result);
+  renderCharts(viewConfig, result);
 }
 
 function updateRealtimeTargets() {
   if (!realtimeRuntime) return;
   const latest = readValues();
-  realtimeRuntime.config.targetAngle = latest.targetAngle;
-  realtimeRuntime.config.targetSpeed = latest.targetSpeed;
-  realtimeRuntime.config.realtimeSpeed = latest.realtimeSpeed;
-  realtimeRuntime.config.realtimeWindowSec = latest.realtimeWindowSec;
-  realtimeRuntime.config.wrapAngle = latest.wrapAngle;
+  const rt = realtimeRuntime;
+  Object.assign(rt.config, latest);
+  rt.anglePid.kp = latest.angleKp;
+  rt.anglePid.ki = latest.angleKi;
+  rt.anglePid.kd = latest.angleKd;
+  rt.anglePid.outLimit = latest.angleOutLimit;
+  rt.anglePid.ioutLimit = latest.angleIOutLimit;
+  rt.speedPid.kp = latest.speedKp;
+  rt.speedPid.ki = latest.speedKi;
+  rt.speedPid.kd = latest.speedKd;
+  rt.speedPid.outLimit = latest.speedOutLimit;
+  rt.speedPid.ioutLimit = latest.speedIOutLimit;
+  rt.config.extStepPeriodSec = Math.max(0.05, Number(latest.extStepPeriodSec) || 1.5);
+  rt.config.extStepHigh = Number(latest.extStepHigh);
+  rt.config.extStepLow = Number(latest.extStepLow);
+}
+
+function toggleExternalStep() {
+  if (!realtimeRuntime) return;
+  updateRealtimeTargets();
+  const rt = realtimeRuntime;
+  rt.stepGen.enabled = !rt.stepGen.enabled;
+  rt.stepGen.highPhase = true;
+  rt.stepGen.anchorTime = rt.stepIndex * rt.dt;
+  setStepButtonText(rt.stepGen.enabled);
+}
+
+function setStepButtonText(enabled) {
+  if (!extStepButton) return;
+  extStepButton.textContent = enabled ? "关闭外部阶跃" : "启用外部阶跃";
 }
 
 function trimRealtimeSeries(rt) {
@@ -358,7 +429,9 @@ function trimRealtimeSeries(rt) {
   if (rt.time.length <= maxPoints) return;
   const removeCount = rt.time.length - maxPoints;
   rt.time.splice(0, removeCount);
+  rt.targetAngleSeries.splice(0, removeCount);
   rt.reference.splice(0, removeCount);
+  rt.targetSpeedSeries.splice(0, removeCount);
   rt.mainValue.splice(0, removeCount);
   rt.speedValue.splice(0, removeCount);
   rt.angleValue.splice(0, removeCount);
@@ -389,7 +462,9 @@ function simulate(config) {
   let speedRpm = config.initialSpeed;
 
   const time = [];
+  const targetAngleSeries = [];
   const reference = [];
+  const targetSpeedSeries = [];
   const mainValue = [];
   const speedValue = [];
   const angleValue = [];
@@ -404,7 +479,8 @@ function simulate(config) {
     const disturbActive = t >= config.disturbTime;
     const appliedLoad = config.loadTorque + (disturbActive ? config.disturbTorque : 0);
 
-    const measuredSpeed = speedRpm + pseudoNoise(i) * config.speedNoise;
+    const measuredSpeedRaw = speedRpm + pseudoNoise(i) * config.speedNoise;
+    const measuredSpeed = Math.round(measuredSpeedRaw);
     const angleErrorRaw = targetAngle - angleDeg;
     const angleError = config.wrapAngle ? wrapTo180(angleErrorRaw) : angleErrorRaw;
 
@@ -413,32 +489,38 @@ function simulate(config) {
       speedTarget = anglePid.update(0, angleError);
     }
 
-    const ctrlOutput = speedPid.update(measuredSpeed, speedTarget);
+    const pidOut = speedPid.update(measuredSpeedRaw, speedTarget);
+    const ffOut = config.speedFeedforwardEnable ? config.speedFeedforwardGain * speedTarget : 0;
+    const ctrlOutput = clampSymmetric(pidOut + ffOut, config.speedOutLimit);
     const cmdCurrent = (ctrlOutput / Math.max(config.speedOutLimit, 1)) * config.maxCurrentA;
     const limitedCurrent = clampSymmetric(cmdCurrent, config.maxCurrentA);
     const torque = limitedCurrent * config.torqueConstant;
 
     // Use command-direction load to avoid discontinuous sign flips near zero speed.
     // This keeps the teaching model stable in speed-only mode while preserving load effect.
-    const loadDirection = Math.sign(speedTarget || config.targetSpeed || 1);
+    const loadDirection = getLoadOpposeDirection(speedRpm, torque);
     const equivalentTargetSpeed = (torque - appliedLoad * loadDirection) * config.speedTorqueGradient;
     const tau = Math.max(config.mechTauMs / 1000, dt);
     speedRpm += (equivalentTargetSpeed - speedRpm) * (dt / tau);
     angleDeg += speedRpm * 6 * dt;
 
     time.push(t);
+    targetAngleSeries.push(targetAngle);
     reference.push(config.mode === "cascade" ? targetAngle : targetSpeed);
-    mainValue.push(config.mode === "cascade" ? angleDeg : speedRpm);
-    speedValue.push(speedRpm);
+    mainValue.push(config.mode === "cascade" ? angleDeg : measuredSpeed);
+    speedValue.push(measuredSpeed);
+    targetSpeedSeries.push(speedTarget);
     angleValue.push(angleDeg);
     output.push(ctrlOutput);
     currentA.push(limitedCurrent);
-    error.push(config.mode === "cascade" ? angleError : targetSpeed - measuredSpeed);
+    error.push(config.mode === "cascade" ? angleError : targetSpeed - measuredSpeedRaw);
   }
 
   return {
     time,
+    targetAngleSeries,
     reference,
+    targetSpeedSeries,
     mainValue,
     speedValue,
     angleValue,
@@ -450,13 +532,19 @@ function simulate(config) {
 }
 
 function calculateMetrics(config, time, reference, actual) {
-  const finalRef = reference[reference.length - 1];
-  const finalActual = actual[actual.length - 1];
-  const steadyError = finalRef - finalActual;
+  const wrapAngleView = config.mode === "cascade" && config.wrapAngle;
+  const refSeries = wrapAngleView ? reference.map((v) => wrapTo180(v)) : reference;
+  const actualSeries = wrapAngleView ? actual.map((v) => wrapTo180(v)) : actual;
+
+  const finalRef = refSeries[refSeries.length - 1];
+  const finalActual = actualSeries[actualSeries.length - 1];
+  const steadyError = wrapAngleView
+    ? wrapTo180(finalRef - finalActual)
+    : (finalRef - finalActual);
   const amplitude = Math.max(Math.abs(finalRef), 1e-6);
 
-  let peak = actual[0];
-  for (const value of actual) {
+  let peak = actualSeries[0];
+  for (const value of actualSeries) {
     if (finalRef >= 0) {
       peak = Math.max(peak, value);
     } else {
@@ -470,8 +558,8 @@ function calculateMetrics(config, time, reference, actual) {
 
   const tolerance = 0.02 * amplitude;
   let settlingTime = null;
-  for (let i = 0; i < actual.length; i += 1) {
-    const tail = actual.slice(i);
+  for (let i = 0; i < actualSeries.length; i += 1) {
+    const tail = actualSeries.slice(i);
     if (tail.every((value) => Math.abs(value - finalRef) <= tolerance)) {
       settlingTime = time[i];
       break;
@@ -480,8 +568,8 @@ function calculateMetrics(config, time, reference, actual) {
 
   let riseTime = null;
   const riseThreshold = finalRef * 0.9;
-  for (let i = 0; i < actual.length; i += 1) {
-    if ((finalRef >= 0 && actual[i] >= riseThreshold) || (finalRef < 0 && actual[i] <= riseThreshold)) {
+  for (let i = 0; i < actualSeries.length; i += 1) {
+    if ((finalRef >= 0 && actualSeries[i] >= riseThreshold) || (finalRef < 0 && actualSeries[i] <= riseThreshold)) {
       riseTime = time[i];
       break;
     }
@@ -537,21 +625,30 @@ function renderCharts(config, result) {
   const xWindowSec = config.simMode === "realtime"
     ? Math.max(1, Number(config.realtimeWindowSec) || 8)
     : null;
+  const wrapAngleView = config.mode === "cascade" && config.wrapAngle;
+  const targetAngleSeries = wrapAngleView
+    ? result.targetAngleSeries.map((v) => wrapTo180(v))
+    : result.targetAngleSeries;
+  const actualAngleSeries = wrapAngleView
+    ? result.angleValue.map((v) => wrapTo180(v))
+    : result.angleValue;
+  const mainSeries = [];
+  if (config.showMainTargetAngle) {
+    mainSeries.push({ label: "目标角度", color: "#b4492d", values: targetAngleSeries });
+  }
+  if (config.showMainActualAngle) {
+    mainSeries.push({ label: "当前角度", color: "#145b73", values: actualAngleSeries });
+  }
+  if (config.showMainTargetSpeed) {
+    mainSeries.push({ label: "目标速度", color: "#7c3aed", values: result.targetSpeedSeries });
+  }
+  if (config.showMainActualSpeed) {
+    mainSeries.push({ label: "当前速度", color: "#1f7a4f", values: result.speedValue });
+  }
 
   drawLineChart(canvases.main, {
     labels: result.time,
-    series: [
-      config.showReference && {
-        label: config.mode === "cascade" ? "目标角度" : "目标速度",
-        color: "#b4492d",
-        values: result.reference,
-      },
-      {
-        label: config.mode === "cascade" ? "实际角度" : "实际速度",
-        color: "#145b73",
-        values: result.mainValue,
-      },
-    ].filter(Boolean),
+    series: mainSeries,
   }, null, { xWindowSec });
 
   drawLineChart(canvases.output, {
@@ -597,16 +694,32 @@ function drawLineChart(canvas, data, hoverIndex = null, options = {}) {
   for (const series of data.series) {
     for (let i = 0; i < data.labels.length; i += 1) {
       const t = data.labels[i];
-      if (t >= minX && t <= maxX) {
-        visibleValues.push(series.values[i]);
+      const v = series.values[i];
+      if (t >= minX && t <= maxX && Number.isFinite(v)) {
+        visibleValues.push(v);
       }
     }
   }
-  const valuesForScale = visibleValues.length > 0
-    ? visibleValues
-    : data.series.flatMap((series) => series.values);
-  let minY = Math.min(...valuesForScale);
-  let maxY = Math.max(...valuesForScale);
+  const allFiniteValues = data.series
+    .flatMap((series) => series.values)
+    .filter((v) => Number.isFinite(v));
+  const valuesForScale = visibleValues.length > 0 ? visibleValues : allFiniteValues;
+
+  let minY;
+  let maxY;
+  if (valuesForScale.length === 0) {
+    minY = -1;
+    maxY = 1;
+  } else {
+    minY = Math.min(...valuesForScale);
+    maxY = Math.max(...valuesForScale);
+  }
+
+  if (!Number.isFinite(minY) || !Number.isFinite(maxY) || minY >= maxY) {
+    minY = -1;
+    maxY = 1;
+  }
+
   if (minY === maxY) {
     minY -= 1;
     maxY += 1;
@@ -658,8 +771,10 @@ function drawLineChart(canvas, data, hoverIndex = null, options = {}) {
     ctx.lineWidth = 2.2;
     ctx.beginPath();
     series.values.forEach((value, index) => {
+      if (!Number.isFinite(value)) return;
+      const safeValue = Math.max(minY, Math.min(maxY, value));
       const x = padding.left + ((data.labels[index] - minX) / safeXSpan) * plotWidth;
-      const y = padding.top + ((maxY - value) / (maxY - minY)) * plotHeight;
+      const y = padding.top + ((maxY - safeValue) / (maxY - minY)) * plotHeight;
       if (index === 0) {
         ctx.moveTo(x, y);
       } else {
@@ -681,7 +796,9 @@ function drawLineChart(canvas, data, hoverIndex = null, options = {}) {
 
     for (const series of data.series) {
       const v = series.values[hoverIndex];
-      const y = padding.top + ((maxY - v) / (maxY - minY)) * plotHeight;
+      if (!Number.isFinite(v)) continue;
+      const safeValue = Math.max(minY, Math.min(maxY, v));
+      const y = padding.top + ((maxY - safeValue) / (maxY - minY)) * plotHeight;
       ctx.beginPath();
       ctx.fillStyle = series.color;
       ctx.arc(hoverX, y, 3.5, 0, Math.PI * 2);
@@ -784,6 +901,18 @@ function pseudoNoise(index) {
   return (x - Math.floor(x)) * 2 - 1;
 }
 
+function getLoadOpposeDirection(speedRpm, driveTorque) {
+  const speedEps = 0.5;
+  const torqueEps = 1e-5;
+  if (Math.abs(speedRpm) > speedEps) {
+    return Math.sign(speedRpm);
+  }
+  if (Math.abs(driveTorque) > torqueEps) {
+    return Math.sign(driveTorque);
+  }
+  return 0;
+}
+
 function format(value, digits) {
   return Number.isFinite(value) ? value.toFixed(digits) : "--";
 }
@@ -803,5 +932,36 @@ function findNearestLabelIndex(labels, target) {
   if (lo === 0) return 0;
   const prev = lo - 1;
   return Math.abs(labels[lo] - target) < Math.abs(labels[prev] - target) ? lo : prev;
+}
+
+function bindMainSeriesToggleRepaint() {
+  [
+    "showMainTargetAngle",
+    "showMainActualAngle",
+    "showMainTargetSpeed",
+    "showMainActualSpeed",
+  ].forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener("change", () => {
+      if (!lastRenderSnapshot) return;
+      const viewConfig = {
+        ...lastRenderSnapshot.config,
+        ...readMainSeriesToggleValues(),
+      };
+      lastRenderSnapshot.config = viewConfig;
+      renderCharts(viewConfig, lastRenderSnapshot.result);
+    });
+  });
+}
+
+function readMainSeriesToggleValues() {
+  const read = (id) => Boolean(document.getElementById(id)?.checked);
+  return {
+    showMainTargetAngle: read("showMainTargetAngle"),
+    showMainActualAngle: read("showMainActualAngle"),
+    showMainTargetSpeed: read("showMainTargetSpeed"),
+    showMainActualSpeed: read("showMainActualSpeed"),
+  };
 }
 

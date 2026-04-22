@@ -41,9 +41,9 @@
 
 ## 工程结构
 
-- [index.html](/C:/BBBBBBBHAPPYBBBBBBB/VScode/MotorPIDSimulation/simulator/index.html)：页面结构与控件
-- [styles.css](/C:/BBBBBBBHAPPYBBBBBBB/VScode/MotorPIDSimulation/simulator/styles.css)：界面样式
-- [app.js](/C:/BBBBBBBHAPPYBBBBBBB/VScode/MotorPIDSimulation/simulator/app.js)：仿真模型、PID 计算、图表绘制与实时逻辑
+- [index.html] 页面结构与控件
+- [styles.css] 界面样式
+- [app.js] 仿真模型、PID 计算、图表绘制与实时逻辑
 
 ## 模型说明（简化）
 
